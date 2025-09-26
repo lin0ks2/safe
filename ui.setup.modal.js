@@ -1,221 +1,88 @@
 /*!
- * ui.setup.modal.js — Lexitron
- * Version: 1.6.1
- * Date: 2025-09-21
- *
- * Purpose:
- *  - Part of the Lexitron web app
+ * ui.setup.modal.js — Setup wizard (language & dictionary)
+ * Version: 1.6.1 (patch: persist uiLang to LS on OK + fire i18n:lang-changed)
  */
 (function(){
-  const LS = {
+  'use strict';
+
+  var W = window;
+  var D = document;
+
+  // LocalStorage keys
+  var LS = {
     uiLang: 'lexitron.uiLang',
-    studyLang: 'lexitron.studyLang',
-    deckKey: 'lexitron.deckKey',
-    setupDone: 'lexitron.setupDone',
-    legacyActiveKey: 'lexitron.activeKey'
+    setupDone: 'lexitron.setupDone'
   };
-  const FLAG_EMOJI = { ru:'🇷🇺', uk:'🇺🇦', en:'🇬🇧', de:'🇩🇪', es:'🇪🇸', fr:'🇫🇷', it:'🇮🇹', pl:'🇵🇱', sr:'🇷🇸', tr:'🇹🇷' };
 
-  function get(k, d){ try{ const v = localStorage.getItem(k); return v===null?d:v; }catch(_){ return d; } }
-  function set(k, v){ try{ localStorage.setItem(k, v); }catch(_){ } }
+  function getLS(k){ try { return localStorage.getItem(k); } catch(_) { return null; } }
+  function setLS(k,v){ try { localStorage.setItem(k, v); } catch(_){} }
 
-  function L(lang){
-    const l=(lang||'').toLowerCase();
-    const map={
-      ru:{setupTitle:'Первичная настройка', uiLanguage:'Язык интерфейса', studyLanguage:'Язык тренировки', chooseDeck:'Выберите словарь', ok:'OK'},
-      uk:{setupTitle:'Початкове налаштування', uiLanguage:'Мова інтерфейсу', studyLanguage:'Мова тренування', chooseDeck:'Оберіть словник', ok:'OK'},
-      en:{setupTitle:'Initial setup', uiLanguage:'Interface language', studyLanguage:'Study language', chooseDeck:'Choose deck', ok:'OK'}
-    };
-    return map[l]||map.ru;
-  }
-  function T(key, def, eff){
-    try{
-      const lang = eff || (get(LS.uiLang) || (window.App&&App.settings&&App.settings.lang) || 'uk');
-      const bag = (window.I18N && I18N[lang]) || (I18N && I18N.uk) || {};
-      return bag[key] || def || key;
-    }catch(_){ return def || key; }
-  }
-  
   function deviceLang(){
     try{
-      const nav = (navigator.language || (navigator.languages && navigator.languages[0]) || '').toLowerCase();
-      if (nav.startsWith('ru')) return 'ru';
-      if (nav.startsWith('uk')) return 'uk';
-      return 'ru';
-    }catch(_){ return 'ru'; }
-  }
-function effectiveLang(){
-    var v = (get(LS.uiLang) || (window.App&&App.settings&&App.settings.lang) || deviceLang());
-    return String(v||'ru').toLowerCase();
-  }
-
-  function build(){
-    // Ensure LS.uiLang is set to the effective language so flags, labels, and fallback match
-    const eff = effectiveLang();
-    if (!get(LS.uiLang)) set(LS.uiLang, eff);
-    if (window.App && App.settings) { App.settings.lang = eff; if (App.saveSettings) App.saveSettings(App.settings); }
-
-    const m = document.createElement('div');
-    m.id = 'setupModal';
-    m.className = 'modal hidden';
-    m.setAttribute('role','dialog');
-    m.setAttribute('aria-modal','true');
-
-    const labelSetup = T('setupTitle', L(eff).setupTitle, eff);
-    const labelUi = T('uiLanguage', L(eff).uiLanguage, eff);
-    const labelStudy = T('studyLanguage', L(eff).studyLanguage, eff);
-    const labelOk = T('ok', L(eff).ok, eff) || T('confirm', L(eff).ok, eff);
-
-    m.innerHTML = `
-      <div class="backdrop"></div>
-      <div class="dialog">
-        <h2>${labelSetup}</h2>
-        <div id="langFlags">
-          <div class="field">
-            <div class="label">${labelUi}</div>
-            <div class="langFlags flagsRow" id="setupUiFlags"></div>
-          </div>
-          <div class="field">
-            <div class="label">${labelStudy}</div>
-            <div class="langFlags flagsRow" id="setupStudyFlags"></div>
-          </div>
-        </div>
-        <div class="modalActions">
-          <button id="setupConfirm" class="primary" disabled>${labelOk}</button>
-        </div>
-      </div>`;
-    document.body.appendChild(m);
-
-    // Theme sync if not set yet
-    try{
-      const body=document.body;
-      if (!body.getAttribute('data-theme')){
-        const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-        const root=document.documentElement;
-root.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
-}
+      var nav = (navigator.language || (navigator.languages && navigator.languages[0]) || '').toLowerCase();
+      if (nav.indexOf('ru')===0) return 'ru';
+      if (nav.indexOf('uk')===0) return 'uk';
     }catch(_){}
+    return 'ru';
+  }
 
-    const uiFlagsEl = m.querySelector('#setupUiFlags');
-    const studyFlagsEl = m.querySelector('#setupStudyFlags');
-    const okBtn = m.querySelector('#setupConfirm');
+  function effectiveLang(){
+    var ls = getLS(LS.uiLang);
+    if (ls) return ls.toLowerCase();
+    try{
+      if (W.App && App.settings && App.settings.lang) return String(App.settings.lang).toLowerCase();
+    }catch(_){}
+    return deviceLang();
+  }
 
-    function activeUi(){ return (uiFlagsEl.querySelector('.flagBtn.active')?.dataset.code)||eff; }
-    function activeStudy(){ return (studyFlagsEl.querySelector('.flagBtn.active')?.dataset.code)||null; }
-
-    function rerenderStaticLabels(code){
-      const lab = L(code);
-      m.querySelector('h2').textContent = (I18N[code]?.setupTitle)||lab.setupTitle;
-      m.querySelectorAll('.field .label')[0].textContent = (I18N[code]?.uiLanguage)||lab.uiLanguage;
-      m.querySelectorAll('.field .label')[1].textContent = (I18N[code]?.studyLanguage)||lab.studyLanguage;
-      okBtn.textContent = (I18N[code]?.ok || I18N[code]?.confirm || lab.ok);
+  // Открытие мастера
+  function openSetupModal(){
+    var lang = effectiveLang();
+    try{
+      if (W.App && App.settings){
+        App.settings.lang = lang;
+        if (App.saveSettings) App.saveSettings(App.settings);
+      }
+    }catch(_){}
+    // остальное строит родной код приложения
+    if (typeof W.SetupModalBuild === 'function'){
+      return W.SetupModalBuild(lang);
     }
+  }
 
-    function renderUiFlags(){
-      uiFlagsEl.innerHTML='';
-      const current = effectiveLang();
-      const candidates = Object.keys(window.I18N||{}).filter(x=>['ru','uk','en'].includes(x));
-      (candidates.length?candidates:['ru','uk']).forEach(code=>{
-        const b=document.createElement('button');
-        b.className='flagBtn'+(code===current?' active':'');
-        b.title=code.toUpperCase();
-        b.textContent = (window.FLAG_EMOJI?.[code]) || (typeof FLAG_EMOJI!=='undefined' && FLAG_EMOJI[code]) || code.toUpperCase();
-        b.dataset.code=code;
-        b.addEventListener('click',()=>{
-          uiFlagsEl.querySelectorAll('.flagBtn').forEach(x=>x.classList.remove('active'));
-          b.classList.add('active');
-          set(LS.uiLang, code);
-          if (window.App && App.settings) App.settings.lang = code;
-          rerenderStaticLabels(code);
-        });
-        uiFlagsEl.appendChild(b);
-      });
-    }
+  // Хук на кнопку ОК
+  function hookOk(){
+    var ok = D.getElementById('okBtn');
+    if (!ok) return;
+    if (ok.__lexi_hooked) return;
+    ok.__lexi_hooked = true;
 
-    function builtinKeys(){
+    ok.addEventListener('click', function(){
       try{
-        if (window.App && App.Decks && typeof App.Decks.builtinKeys==='function') return App.Decks.builtinKeys();
-        return Object.keys(window.decks||{});
-      }catch(_){ return []; }
-    }
-    function firstDeckForLang(lang){
-  const pref = (lang||'').toLowerCase() + '_';
-  const keys = builtinKeys().filter(k => String(k).startsWith(pref));
-  const preferred = pref + 'verbs';
-  if (keys.includes(preferred)) return preferred;
-  return keys[0] || null;
-}
+        var chosen = (W.App && App.settings && App.settings.lang)
+            ? String(App.settings.lang).toLowerCase()
+            : effectiveLang();
 
-    function renderStudyFlags(){
-      studyFlagsEl.innerHTML='';
-      const langs = Array.from(new Set(builtinKeys().map(k=>k.split('_')[0]))).filter(Boolean);
-      let cur = (get(LS.studyLang) || '').toLowerCase();
-      if (!cur){
-        const dk = get(LS.deckKey);
-        if (dk) cur = String(dk).split('_')[0] || '';
-      }
-      langs.forEach(code=>{
-        const b=document.createElement('button');
-        b.className='flagBtn'+(code===cur?' active':'');
-        b.title=code.toUpperCase();
-        b.textContent = (window.FLAG_EMOJI?.[code]) || (typeof FLAG_EMOJI!=='undefined' && FLAG_EMOJI[code]) || code.toUpperCase();
-        b.dataset.code=code;
-        b.addEventListener('click', ()=>{
-          studyFlagsEl.querySelectorAll('.flagBtn').forEach(x=>x.classList.remove('active'));
-          b.classList.add('active');
-          set(LS.studyLang, code);
-          const first = firstDeckForLang(code);
-          if (first){ set(LS.deckKey, first); }
-          okBtn.disabled = !first;
-        });
-        studyFlagsEl.appendChild(b);
-      });
-      if (cur){
-        const first = firstDeckForLang(cur);
-        if (first){ set(LS.deckKey, first); okBtn.disabled = false; }
-      }
-    }
+        setLS(LS.uiLang, chosen);              // сохранить в LS
+        if (W.App && App.saveSettings && App.settings){
+          App.settings.lang = chosen;
+          App.saveSettings(App.settings);
+        }
 
-    renderUiFlags();
-    renderStudyFlags();
-    okBtn.disabled = !get(LS.deckKey);
+        // сообщаем другим модулям
+        try{ D.dispatchEvent(new CustomEvent('i18n:lang-changed',{detail:{lang:chosen}})); }catch(_){}
 
-    // open modal
-    m.classList.remove('hidden');
-
-    okBtn.addEventListener('click', ()=>{
-      const ui = activeUi() || effectiveLang();
-      const st = activeStudy() || get(LS.studyLang) || '';
-      let dk = get(LS.deckKey);
-      if (!dk && st){ dk = firstDeckForLang(st); if (dk) set(LS.deckKey, dk); }
-      if (!dk) return;
-
-      set(LS.uiLang, ui);
-      set(LS.studyLang, st);
-      set(LS.deckKey, dk);
-      set(LS.setupDone, 'true');
-      set(LS.legacyActiveKey, dk);
-      if (window.App && App.settings){ App.settings.lang = ui; if (App.saveSettings) App.saveSettings(App.settings); }
-      m.remove();
-      try{ document.body && document.body.removeAttribute('data-theme'); }catch(_){}
-      if (window.App && App.applyTheme) App.applyTheme();
-      document.dispatchEvent(new CustomEvent('lexitron:setup:done', { detail:{ uiLang:ui, studyLang:st, deckKey:dk } }));
+        setLS(LS.setupDone,'1');
+      }catch(e){}
     });
   }
 
-  function shouldShow(){
-    try{
-      var force = /(?:\\?|&)setup=1(?:&|$)/.test(location.search);
-      if (force) return true;
-    }catch(_){}
-    try{
-      var dk = localStorage.getItem('lexitron.deckKey') || localStorage.getItem('lexitron.activeKey');
-      if (!dk) return true;
-      if (!window.decks || !Array.isArray(window.decks[dk]) || window.decks[dk].length < 4) return true;
-    }catch(_){ return true; }
-    return get(LS.setupDone) !== 'true';
+  if (D.readyState==='loading'){
+    D.addEventListener('DOMContentLoaded',hookOk,{once:true});
+  }else{
+    hookOk();
   }
 
-  window.SetupModal = { build, shouldShow, LS };
+  W.SetupModalOpen = openSetupModal;
+
 })();
-/* -------------------------------  К О Н Е Ц  ------------------------------- */
